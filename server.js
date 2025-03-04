@@ -1,5 +1,3 @@
-// server.js - API com segurança e validação
-
 import express from 'express';
 import cors from 'cors';
 import jwt from 'jsonwebtoken';
