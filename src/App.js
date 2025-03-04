@@ -1,6 +1,6 @@
 import React from 'react';
 import './App.css';
-import Home from './Home'; // Certifique-se de que a importação está correta
+import Home from './pages/Home'; // Ajuste o caminho se necessário
 
 function App() {
   return (
@@ -10,4 +10,4 @@ function App() {
   );
 }
 
-export default App; // Certifique-se de que esta linha está presente
+export default App;

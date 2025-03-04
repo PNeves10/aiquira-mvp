@@ -42,6 +42,12 @@ app.post('/api/register', async (req, res) => {
         return res.status(400).json({ error: "Email válido e senha com pelo menos 6 caracteres são obrigatórios" });
     }
     
+    // Verifica se o usuário já existe
+    const existingUser  = users.find((u) => u.email === email);
+    if (existingUser ) {
+        return res.status(400).json({ error: "Usuário já registrado com este email" });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     users.push({ email, password: hashedPassword });
     res.status(201).json({ message: "Utilizador registado com sucesso" });
@@ -81,6 +87,7 @@ app.get('/api/listings', (req, res) => {
     res.json(listings);
 });
 
+// Iniciar o servidor
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
     console.log(`Servidor rodando na porta ${PORT}`);

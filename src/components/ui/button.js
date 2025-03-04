@@ -3,6 +3,7 @@ import React from 'react';
 const Button = ({ children, onClick, className }) => {
   return (
     <button
+      type="button" // Adicione esta linha
       onClick={onClick}
       className={`bg-blue-500 text-white p-2 rounded ${className}`}
     >
