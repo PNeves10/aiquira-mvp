@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import { jwtDecode } from "jwt-decode"; // Corrigido para importação nomeada
 import Card from "../components/ui/card.js"; // Adicione a extensão .js
 import CardContent from "../components/ui/cardContent.js"; // Adicione a extensão .js
 import Input from "../components/ui/input.js"; // Adicione a extensão .js
@@ -14,11 +15,20 @@ const MainPage = ({ token, setToken, handleLogout }) => {
     const [loadingSubmit, setLoadingSubmit] = useState(false); // Estado de carregamento para submissão
     const [search, setSearch] = useState(""); // Estado para pesquisa
     const [sort, setSort] = useState(""); // Estado para ordenação
+    const [username, setUsername] = useState(""); // Estado para o username
 
+    // Decodificar o token para obter o username
+    useEffect(() => {
+        if (token) {
+            const decodedToken = jwtDecode(token);
+            setUsername(decodedToken.username); // Armazena o username
+        }
+    }, [token]);
+
+    // Debounce para a pesquisa
     const [debouncedSearch, setDebouncedSearch] = useState(search);
     const hasFetched = useRef(false); // Evita múltiplos fetchs
 
-    // Debounce para a pesquisa
     useEffect(() => {
         const handler = setTimeout(() => {
             setDebouncedSearch(search);
@@ -32,17 +42,17 @@ const MainPage = ({ token, setToken, handleLogout }) => {
     // Função para buscar listagens
     const fetchListings = async () => {
         console.log("Fetching listings with search:", debouncedSearch, "and sort:", sort); // Log de debug
-    
+        
         setLoading(true);
+        setError(""); // Limpar erros anteriores
         try {
             const response = await fetch(`http://localhost:5000/api/listings?search=${debouncedSearch}&sort=${sort}`, {
                 method: 'GET',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
+                headers: { Authorization: `Bearer ${token}` },
             });
     
             if (!response.ok) {
+                if (response.status === 401) throw new Error("Sessão expirada. Faça login novamente.");
                 const errorData = await response.json();
                 throw new Error(errorData.error || "Erro ao buscar listagens");
             }
@@ -56,11 +66,11 @@ const MainPage = ({ token, setToken, handleLogout }) => {
                 setError("Os dados retornados não são válidos.");
             }
         } catch (err) {
-            setError("Não foi possível carregar as listagens.");
+            setError(err.message || "Falha ao carregar listagens. Verifique sua conexão.");
         } finally {
             setLoading(false);
         }
-    };
+    };    
 
     // UseEffect para validar o token
     useEffect(() => {
@@ -98,48 +108,47 @@ const MainPage = ({ token, setToken, handleLogout }) => {
         if (!newListing.url || !newListing.price || !newListing.description || !image) {
             return setError("Todos os campos são obrigatórios.");
         }
-
+    
         const formData = new FormData();
         formData.append("url", newListing.url);
         formData.append("price", newListing.price);
         formData.append("description", newListing.description);
-        formData.append("image", image); // Adiciona a imagem ao FormData
-
-        setLoadingSubmit(true); // Inicia o carregamento da submissão
+        formData.append("image", image);
+    
+        setLoadingSubmit(true); 
+        setError(""); // Limpar erros anteriores
         try {
             const response = await fetch("http://localhost:5000/api/listings", {
                 method: "POST",
-                headers: {
-                    Authorization: `Bearer ${token}`, // Adicione o token aqui
-                },
-                body: formData, // Envia o FormData
+                headers: { Authorization: `Bearer ${token}` },
+                body: formData,
             });
-
+    
             if (!response.ok) {
                 const errorData = await response.json();
                 throw new Error(errorData.error || "Erro ao publicar website");
             }
-
+    
             const data = await response.json();
-            setListings((prevListings) => {
-                const updatedListings = [...prevListings, data];
-                return updatedListings;
-            });
+            setListings((prevListings) => [...prevListings, data]);
+            
+            // Limpar formulário e exibir mensagem de sucesso
             setNewListing({ url: "", price: "", description: "" });
-            setImage(null); // Limpa o estado da imagem
-            setError(""); // Limpa o erro após sucesso
+            setImage(null);
+            alert("Website publicado com sucesso!");
         } catch (err) {
             setError(err.message);
         } finally {
-            setLoadingSubmit(false); // Finaliza o carregamento da submissão
+            setLoadingSubmit(false);
         }
-    };
+    };    
 
     return (
         <div>
             <h2 className="text-2xl font-bold mb-4">Listar Website para Venda</h2>
+            <p>Bem-vindo, {username}!</p> {/* Exibe o username */}
             <Button className="mb-4" onClick={handleLogout}>Logout</Button> {/* Botão de logout */}
-            {error && <p className="text-red-500">{error}</p>} {/* Mensagem de erro */}
+            {error && <p className="text-red-500 bg-red-100 p-2 rounded">{error}</p>} {/* Mensagem de erro */}
 
             <div className="flex gap-4 mb-4">
                 <input
@@ -220,7 +229,7 @@ const MainPage = ({ token, setToken, handleLogout }) => {
                             </Card>
                         );
                     })}
-            </div>
+                </div>
             )}
         </div>
     );
