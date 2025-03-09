@@ -1,3 +1,11 @@
 @tailwind base;
 @tailwind components;
-@tailwind utilities; 
+@tailwind utilities;
+
+img {
+    max-width: 200px; /* Define a largura máxima da imagem */
+    height: auto; /* Mantém a proporção da imagem */
+    border-radius: 8px; /* Adiciona bordas arredondadas */
+    border: 1px solid #ddd; /* Adiciona uma borda cinza clara */
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1); /* Adiciona uma sombra sutil */
+}

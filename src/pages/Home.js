@@ -1,26 +1,46 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Route, Routes, Navigate } from "react-router-dom";
-import Card from "../components/ui/card"; // Ajuste o caminho se necessário
-import CardContent from "../components/ui/cardContent"; // Ajuste o caminho se necessário
-import Input from "../components/ui/input"; // Ajuste o caminho se necessário
-import Button from "../components/ui/button"; // Ajuste o caminho se necessário
-import MainPage from "./MainPage"; // Importando o novo componente
-import RegisterPage from "./RegisterPage"; // Importando a nova página de registro
+import Card from "../components/ui/card.js"; // Adicione a extensão .js
+import CardContent from "../components/ui/cardContent.js"; // Adicione a extensão .js
+import Input from "../components/ui/input.js"; // Adicione a extensão .js
+import Button from "../components/ui/button.js"; // Adicione a extensão .js
+import MainPage from "./MainPage.js"; // Adicione a extensão .js
+import RegisterPage from "./RegisterPage.js"; // Adicione a extensão .js
 
 export default function Home() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false); // Estado de carregamento
 
   useEffect(() => {
     const storedToken = localStorage.getItem("token");
     if (storedToken) {
-      setToken(storedToken);
+      fetch("http://localhost:5000/api/validate-token", {
+        headers: { Authorization: storedToken },
+      })
+        .then((res) => {
+          if (!res.ok) throw new Error("Token inválido");
+          return res.json();
+        })
+        .then((data) => {
+          if (data.valid) {
+            setToken(storedToken);
+          } else {
+            localStorage.removeItem("token");
+            setToken("");
+          }
+        })
+        .catch((err) => {
+          localStorage.removeItem("token");
+          setToken("");
+        });
     }
   }, []);
 
   const handleLogin = async () => {
+    setLoading(true); // Inicia o carregamento
     try {
       const response = await fetch("http://localhost:5000/api/login", {
         method: "POST",
@@ -37,14 +57,15 @@ export default function Home() {
       localStorage.setItem("token", data.token);
       setToken(data.token);
     } catch (err) {
-      console.error("Erro ao fazer login:", err);
       setError(err.message);
+    } finally {
+      setLoading(false); // Finaliza o carregamento
     }
   };
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
-    setToken("");
+    localStorage.removeItem("token"); // Remove o token do localStorage
+    setToken(""); // Limpa o estado do token
   };
 
   return (
@@ -69,10 +90,15 @@ export default function Home() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
-                <Button className="mt-4 w-full" onClick={handleLogin}>Entrar</Button>
+                <Button className="mt-4 w-full" onClick={handleLogin} disabled={loading}>
+                  {loading ? "Carregando..." : "Entrar"}
+                </Button>
                 <p className="mt-2 text-sm">
                   Não tem uma conta?{" "}
-                  <Button onClick={() => window.location.href = "/register"} className="text-blue-500">
+                  <Button 
+                    onClick={() => window.location.href = "/register"} 
+                    className="mt-2 text-sm text-white bg-blue-500" // Apenas text-white
+                  >
                     Registrar
                   </Button>
                 </p>
