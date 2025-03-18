@@ -1,138 +1,115 @@
-import React, { useEffect, useState, useRef } from "react";
-import { jwtDecode } from "jwt-decode"; // Corrigido para importação nomeada
-import Card from "../components/ui/card.js"; // Adicione a extensão .js
-import CardContent from "../components/ui/cardContent.js"; // Adicione a extensão .js
-import Input from "../components/ui/input.js"; // Adicione a extensão .js
-import Button from "../components/ui/button.js"; // Adicione a extensão .js
-import Textarea from "../components/ui/textarea.js"; // Adicione a extensão .js
+import React, { useEffect, useState, useCallback } from "react";
+import { jwtDecode } from "jwt-decode";
+import { useNavigate } from "react-router-dom";
+import Card from "../components/ui/card.js";
+import CardContent from "../components/ui/cardContent.js";
+import Input from "../components/ui/input.js";
+import Button from "../components/ui/button.js";
+import Textarea from "../components/ui/textarea.js";
+import { ClipLoader } from "react-spinners";
+import Chat from "../components/Chat.js";
 
 const MainPage = ({ token, setToken, handleLogout }) => {
+    const navigate = useNavigate();
     const [listings, setListings] = useState([]);
     const [newListing, setNewListing] = useState({ url: "", price: "", description: "" });
-    const [image, setImage] = useState(null); // Estado para a imagem
+    const [image, setImage] = useState(null);
     const [error, setError] = useState("");
-    const [loading, setLoading] = useState(true); // Estado de carregamento das listagens
-    const [loadingSubmit, setLoadingSubmit] = useState(false); // Estado de carregamento para submissão
-    const [search, setSearch] = useState(""); // Estado para pesquisa
-    const [sort, setSort] = useState(""); // Estado para ordenação
-    const [username, setUsername] = useState(""); // Estado para o username
+    const [loading, setLoading] = useState(true);
+    const [loadingSubmit, setLoadingSubmit] = useState(false);
+    const [search, setSearch] = useState("");
+    const [sort, setSort] = useState("");
+    const [username, setUsername] = useState("");
+    const [role, setRole] = useState("");
 
-    // Decodificar o token para obter o username
+    // Descodificar o token para obter username e role
     useEffect(() => {
         if (token) {
             const decodedToken = jwtDecode(token);
-            setUsername(decodedToken.username); // Armazena o username
+            setUsername(decodedToken.username);
+            setRole(decodedToken.role || "user");
         }
-    }, [token]);
+    }, [token]);    
 
-    // Debounce para a pesquisa
-    const [debouncedSearch, setDebouncedSearch] = useState(search);
-    const hasFetched = useRef(false); // Evita múltiplos fetchs
-
-    useEffect(() => {
-        const handler = setTimeout(() => {
-            setDebouncedSearch(search);
-        }, 300); // 300ms de debounce
-
-        return () => {
-            clearTimeout(handler);
-        };
-    }, [search]);
-
-    // Função para buscar listagens
-    const fetchListings = async () => {
-        console.log("Fetching listings with search:", debouncedSearch, "and sort:", sort); // Log de debug
-        
+    // Buscar listagens
+    const fetchListings = useCallback(async () => {
         setLoading(true);
-        setError(""); // Limpar erros anteriores
+        setError("");
+
         try {
-            const response = await fetch(`http://localhost:5000/api/listings?search=${debouncedSearch}&sort=${sort}`, {
-                method: 'GET',
-                headers: { Authorization: `Bearer ${token}` },
-            });
-    
+            const response = await fetch(
+                `http://localhost:5000/api/listings?search=${search}&sort=${sort}`,
+                { headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" } }
+            );
+
             if (!response.ok) {
-                if (response.status === 401) throw new Error("Sessão expirada. Faça login novamente.");
+                if (response.status === 401) throw new Error("A sessão expirou. Iniciar sessão novamente.");
                 const errorData = await response.json();
                 throw new Error(errorData.error || "Erro ao buscar listagens");
             }
-    
+
             const data = await response.json();
-            console.log("Listings received:", data); // Log da resposta da API
-    
-            if (Array.isArray(data)) {
-                setListings(data);
-            } else {
-                setError("Os dados retornados não são válidos.");
-            }
+            setListings(Array.isArray(data) ? data : []);
         } catch (err) {
-            setError(err.message || "Falha ao carregar listagens. Verifique sua conexão.");
+            setError(err.message || "Falha ao carregar listagens.");
         } finally {
             setLoading(false);
         }
-    };    
+    }, [search, sort, token]);
 
-    // UseEffect para validar o token
+    // Validar Token
     useEffect(() => {
         const validateToken = async () => {
             try {
                 const response = await fetch("http://localhost:5000/api/validate-token", {
                     headers: { Authorization: `Bearer ${token}` },
                 });
-                if (!response.ok) {
-                    setToken(null); // Remove o token inválido
-                }
-            } catch (err) {
-                console.error("Erro ao validar token:", err);
+                if (!response.ok) setToken(null);
+            } catch {
                 setToken(null);
             }
         };
 
         if (token) validateToken();
-    }, [token]);
+    }, [token, setToken]);
 
-    // UseEffect para buscar listagens
+    // Carregar Listagens
     useEffect(() => {
-        if (token === null) return; // Não faz fetch se não houver token
-        if (search === "" && sort === "" && listings.length > 0) return; // Evita refetch desnecessário
+        if (token) fetchListings();
+    }, [fetchListings, token, sort]);
 
-        fetchListings();
-    }, [search, sort, token]); // Dispara a busca sempre que um desses mudar
-
-    const handleImageChange = (e) => {
-        setImage(e.target.files[0]); // Atualiza o estado da imagem
-    };
+    const handleImageChange = (e) => setImage(e.target.files[0]);
 
     const handleListWebsite = async () => {
         if (!token) return alert("Precisa estar autenticado!");
         if (!newListing.url || !newListing.price || !newListing.description || !image) {
             return setError("Todos os campos são obrigatórios.");
         }
-    
+
         const formData = new FormData();
         formData.append("url", newListing.url);
         formData.append("price", newListing.price);
         formData.append("description", newListing.description);
         formData.append("image", image);
-    
-        setLoadingSubmit(true); 
-        setError(""); // Limpar erros anteriores
+
+        setLoadingSubmit(true);
+        setError("");
+
         try {
             const response = await fetch("http://localhost:5000/api/listings", {
                 method: "POST",
                 headers: { Authorization: `Bearer ${token}` },
                 body: formData,
             });
-    
+
             if (!response.ok) {
                 const errorData = await response.json();
-                throw new Error(errorData.error || "Erro ao publicar website");
+                throw new Error(errorData.error || "Erro ao publicar o website");
             }
-    
+
             const data = await response.json();
             setListings((prevListings) => [...prevListings, data]);
-            
-            // Limpar formulário e exibir mensagem de sucesso
+
             setNewListing({ url: "", price: "", description: "" });
             setImage(null);
             alert("Website publicado com sucesso!");
@@ -141,96 +118,69 @@ const MainPage = ({ token, setToken, handleLogout }) => {
         } finally {
             setLoadingSubmit(false);
         }
-    };    
+    };
 
     return (
-        <div>
-            <h2 className="text-2xl font-bold mb-4">Listar Website para Venda</h2>
-            <p>Bem-vindo, {username}!</p> {/* Exibe o username */}
-            <Button className="mb-4" onClick={handleLogout}>Logout</Button> {/* Botão de logout */}
-            {error && <p className="text-red-500 bg-red-100 p-2 rounded">{error}</p>} {/* Mensagem de erro */}
+        <div className="p-6 flex flex-col items-center relative"> 
+            {/* 🔹 Barra superior */}
+            <div className="absolute top-4 right-4 flex items-center gap-4">
+                <p className="text-lg font-semibold">Bem-vindo, <span className="text-blue-600">{role === "admin" ? "Admin" : username}</span>!</p>
+                <Button className="bg-red-500 text-white px-4 py-2 rounded" onClick={handleLogout}>
+                    Logout
+                </Button>
+            </div>
 
-            <div className="flex gap-4 mb-4">
-                <input
-                    type="text"
-                    placeholder="Buscar websites..."
-                    className="border p-2 rounded w-full"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                />
+            <h2 className="text-2xl font-bold mb-4 text-center mt-12">Listar Website para Venda</h2>
 
-                <select
-                    className="border p-2 rounded"
-                    value={sort}
-                    onChange={(e) => {
-                        setSort(e.target.value);
-                    }}
-                >
+            {/* Botão para o Painel Administrativo */}
+            {role === "admin" && (
+                <Button className="bg-blue-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/admin")}>
+                    Painel Administrativo
+                </Button>
+            )}
+
+            {error && <p role="alert" className="text-red-500 bg-red-100 p-2 rounded text-center">{error}</p>}
+
+            <div className="flex gap-4 mb-4 justify-center">
+                <Input type="text" placeholder="Buscar websites..." value={search} onChange={(e) => setSearch(e.target.value)} />
+                <select className="border p-2 rounded" value={sort} onChange={(e) => setSort(e.target.value)}>
                     <option value="">Ordenar</option>
                     <option value="price_asc">Preço: Menor → Maior</option>
                     <option value="price_desc">Preço: Maior → Menor</option>
                 </select>
             </div>
 
-            <div className="w-full max-w-md p-4 mb-6 border">
-                <Input
-                    type="text"
-                    placeholder="URL do website"
-                    value={newListing.url}
-                    onChange={(e) => setNewListing({ ...newListing, url: e.target.value })}
-                />
-                <Input
-                    type="number"
-                    placeholder="Preço (€)"
-                    value={newListing.price}
-                    onChange={(e) => setNewListing({ ...newListing, price: e.target.value })}
-                />
-                <Textarea
-                    placeholder="Descrição"
-                    value={newListing.description}
-                    onChange={(e) => setNewListing({ ...newListing, description: e.target.value })}
-                />
-                <input type="file" accept="image/*" onChange={handleImageChange} className="mt-2" />
-                <Button className="mt-4 w-full" onClick={handleListWebsite} disabled={loadingSubmit}>
-                    {loadingSubmit ? "Publicando..." : "Publicar Website"}
-                </Button>
-            </div>
+            <Card className="w-full max-w-md p-4">
+                <CardContent>
+                    <Input type="text" placeholder="URL do website" value={newListing.url} onChange={(e) => setNewListing({ ...newListing, url: e.target.value })} />
+                    <Input type="number" placeholder="Preço (€)" value={newListing.price} onChange={(e) => setNewListing({ ...newListing, price: e.target.value })} />
+                    <Textarea placeholder="Descrição" value={newListing.description} onChange={(e) => setNewListing({ ...newListing, description: e.target.value })} />
+                    <input type="file" accept="image/*" onChange={handleImageChange} className="mt-2" />
+                    <Button className="mt-4 w-full" onClick={handleListWebsite} disabled={loadingSubmit}>
+                        {loadingSubmit ? "Publicando..." : "Publicar Website"}
+                    </Button>
+                </CardContent>
+            </Card>
 
-            <h2 className="text-2xl font-bold mb-4">Websites Disponíveis para Compra</h2>
-            {loading ? (
-                <p>Carregando listagens...</p>
-            ) : listings.length === 0 ? (
-                <p>Nenhum resultado encontrado.</p>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl">
-                    {listings.map((listing) => {
-                        const imagePath = `http://localhost:5000${listing.image}`;
+            <h2 className="text-2xl font-bold mt-8 mb-4 text-center">Websites Disponíveis para Compra</h2>
 
-                        return (
-                            <Card key={listing.id} className="p-4">
-                                <CardContent>
-                                    {listing.image && (
-                                        <img
-                                            src={imagePath}
-                                            alt="Website"
-                                            className="w-full max-w-xs h-48 object-contain rounded-lg border border-gray-300 shadow-md"
-                                            onError={(e) => {
-                                                if (!e.target.dataset.failed) {
-                                                    e.target.dataset.failed = true; // Marca como falha para evitar recarregar
-                                                    e.target.src = "/placeholder.png"; // Usa imagem alternativa
-                                                }
-                                            }}
-                                        />
-                                    )}
-                                    <p><strong>URL:</strong> <a href={listing.url} target="_blank" rel="noopener noreferrer">{listing.url}</a></p>
-                                    <p><strong>Preço:</strong> {listing.price} €</p>
-                                    <p><strong>Descrição:</strong> {listing.description}</p>
-                                </CardContent>
-                            </Card>
-                        );
-                    })}
+            {loading ? <ClipLoader size={35} color={"#123abc"} loading={loading} /> : 
+                listings.length === 0 ? <p className="text-center">Nenhum resultado encontrado.</p> : 
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full max-w-4xl justify-center">
+                    {listings.map((listing) => (
+                        <Card key={listing._id} className="p-4 flex flex-col items-center">
+                            <CardContent className="flex flex-col items-center text-center">
+                                <img src={`http://localhost:5000${listing.image}`} alt={`Imagem de ${listing.url}`} className="w-full max-w-xs h-48 object-cover rounded-lg border shadow-md" />
+                                <p><strong>URL:</strong> <a href={listing.url} target="_blank" rel="noopener noreferrer">{listing.url}</a></p>
+                                <p><strong>Preço:</strong> {listing.price} €</p>
+                                <p><strong>Descrição:</strong> {listing.description}</p>
+                            </CardContent>
+                        </Card>
+                    ))}
                 </div>
-            )}
+            }
+
+            <Chat user={{ email: username }} />
         </div>
     );
 };
