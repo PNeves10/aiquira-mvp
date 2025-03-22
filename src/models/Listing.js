@@ -6,7 +6,7 @@ const listingSchema = new mongoose.Schema({
     price: { type: Number, required: true },
     description: { type: String, required: true },
     image: { type: String, required: false },
-    owner: { type: String, required: true },
+    owner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true }, // Alterado para ObjectId que referencia o modelo User
 }, { timestamps: true }); // Adiciona campos de createdAt e updatedAt
 
 // Criando o modelo

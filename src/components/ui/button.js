@@ -1,16 +1,15 @@
 import React from 'react';
+import { motion } from 'framer-motion';
 
-const Button = ({ children, onClick, className = '', disabled }) => {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`p-2 rounded ${disabled ? 'bg-gray-400 text-gray-700 cursor-not-allowed' : ''} ${className}`}
-      disabled={disabled}
-    >
-      {children}
-    </button>
-  );
-};
+const Button = ({ children, onClick, className = '', disabled }) => (
+  <motion.button
+    whileTap={{ scale: 0.95 }}
+    onClick={onClick}
+    disabled={disabled}
+    className={`p-2 rounded transition ${disabled ? 'bg-gray-400 text-gray-700 cursor-not-allowed' : ''} ${className}`}
+  >
+    {children}
+  </motion.button>
+);
 
 export default Button;

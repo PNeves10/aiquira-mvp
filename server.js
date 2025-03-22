@@ -14,6 +14,7 @@ import { dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { Server } from "socket.io";
 import http from 'http';
+import nodemailer from 'nodemailer';
 import Listing from './src/models/Listing.js';
 import User from './src/models/User.js';
 
@@ -35,20 +36,47 @@ const io = new Server(server, {
 let messages = []; // Array para armazenar mensagens temporariamente
 
 io.on("connection", (socket) => {
-  console.log("Novo utilizador ligado!");
+    console.log("Novo utilizador ligado!");
 
-  /// Enviar mensagens armazenadas para o utilizador conectado
-  socket.emit("loadMessages", messages);
+    // Enviar mensagens armazenadas para o utilizador conectado
+    socket.emit("loadMessages", messages);
 
-  // Receber e armazenar novas mensagens
-  socket.on("sendMessage", (data) => {
-    messages.push(data); // Guardar mensagem no array (pode ser guardado na base de dados mais tarde)
-    io.emit("receiveMessage", data); // Enviar mensagem a todos os utilizadores ligados
-  });
+    // Notificar admin quando um novo usuário se regista
+    socket.on("newUser ", (user) => {
+        io.emit("adminNotification", `Novo utilizador registado: ${user.username}`);
+    });
 
-  socket.on("disconnect", () => {
-    console.log("Utilizador desligado");
-  });
+    // Notificar admin quando uma nova listagem é criada
+    socket.on("newListing", (listing) => {
+        io.emit("adminNotification", `Nova listagem publicada: ${listing.url}`);
+    });
+
+    // Enviar mensagem e notificar todos os usuários
+    socket.on("sendMessage", async (data) => {
+        messages.push(data); // Guardar mensagem no array
+        io.emit("receiveMessage", data); // Enviar mensagem a todos os utilizadores ligados
+
+        // Emitir notificação para todos os usuários
+        io.emit("newMessageNotification", `Nova mensagem de ${data.sender}: "${data.text}"`);
+
+        // Notificar admin sobre novas mensagens no chat
+        io.emit("adminNotification", `Nova mensagem de ${data.sender}: "${data.text}"`);
+
+        // Buscar email do destinatário (se necessário)
+        const recipient = await User.findOne({ username: data.receiver });
+        if (recipient) {
+            sendEmail(
+                recipient.email,
+                "📩 Nova mensagem no AIQuira",
+                `Recebeu uma nova mensagem de ${data.sender}: "${data.text}"`,
+                `<p><strong>${data.sender}</strong> enviou-lhe uma mensagem:</p><blockquote>${data.text}</blockquote>`
+            );
+        }
+    });
+
+    socket.on("disconnect", () => {
+        console.log("Utilizador desligado");
+    });
 });
 
 // Configurações do Express
@@ -86,15 +114,43 @@ app.use(limiter);
 
 // Middleware de autenticação JWT
 const authenticateToken = (req, res, next) => {
-    const token = req.headers.authorization?.split(' ')[1]; 
+    const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: "Acesso negado" });
 
     jwt.verify(token, process.env.SECRET_KEY, (err, user) => {
         if (err) return res.status(403).json({ error: "Token inválido" });
-        req.user = user;
+
+        // Certifique-se de que req.user._id está definido
+        req.user = { ...user, _id: user._id || user.id };
         next();
     });
 };
+
+// Endpoint para verificar se o email já existe
+app.get("/api/check-email", async (req, res) => {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ error: "Email não fornecido." });
+
+    const user = await User.findOne({ email });
+    if (user) {
+        return res.json({ exists: true });
+    } else {
+        return res.json({ exists: false });
+    }
+});
+
+// Endpoint para verificar se o nome de usuário já existe
+app.get("/api/check-username", async (req, res) => {
+    const { username } = req.query;
+    if (!username) return res.status(400).json({ error: "Username não fornecido." });
+
+    const user = await User.findOne({ username });
+    if (user) {
+        return res.json({ exists: true });
+    } else {
+        return res.json({ exists: false });
+    }
+});
 
 // Middleware para verificar se o utilizador é admin
 const isAdmin = async (req, res, next) => {
@@ -119,7 +175,7 @@ app.get("/api/admin/users", authenticateToken, isAdmin, async (req, res) => {
     }
 });
 
-// // ✅ Eliminar utilizador (apenas para admin)
+// ✅ Eliminar utilizador (apenas para admin)
 app.delete("/api/admin/users/:id", authenticateToken, isAdmin, async (req, res) => {
     try {
         const user = await User.findByIdAndDelete(req.params.id);
@@ -130,15 +186,34 @@ app.delete("/api/admin/users/:id", authenticateToken, isAdmin, async (req, res) 
     }
 });
 
-// ✅ Eliminar listagem (apenas para admin)
-app.delete("/api/admin/listings/:id", authenticateToken, isAdmin, async (req, res) => {
-    try {
-        const listing = await Listing.findByIdAndDelete(req.params.id);
-        if (!listing) return res.status(404).json({ error: "Listagem não encontrada." });
-        res.json({ message: "Listagem removida com sucesso." });
-    } catch (error) {
-        res.status(500).json({ error: "Erro ao remover listagem." });
+// ✅ Adicionar ou remover favorito
+app.post("/api/favorites/:listingId", authenticateToken, async (req, res) => {
+    const user = await User.findOne({ email: req.user.email });
+    if (!user) return res.status(404).json({ error: "Utilizador não encontrado" });
+
+    const listingId = req.params.listingId;
+
+    // Verifica se já está nos favoritos
+    const isFavorited = user.favorites.includes(listingId);
+
+    if (isFavorited) {
+        // Remove dos favoritos
+        user.favorites = user.favorites.filter((id) => id.toString() !== listingId);
+    } else {
+        // Adiciona aos favoritos
+        user.favorites.push(listingId);
     }
+
+    await user.save();
+    res.json({ success: true, favorites: user.favorites });
+});
+
+// ✅ Obter favoritos do utilizador
+app.get("/api/favorites", authenticateToken, async (req, res) => {
+    const user = await User.findOne({ email: req.user.email }).populate("favorites");
+    if (!user) return res.status(404).json({ error: "Utilizador não encontrado" });
+
+    res.json(user.favorites);
 });
 
 // Middleware de validação de input (Proteção extra)
@@ -157,8 +232,35 @@ const storage = multer.diskStorage({
     filename: (req, file, cb) => {
         cb(null, Date.now() + path.extname(file.originalname));
     },
-});
+ });
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
+
+// Configuração do Nodemailer
+const transporter = nodemailer.createTransport({
+    host: process.env.EMAIL_HOST,
+    port: process.env.EMAIL_PORT,
+    secure: false, // true para 465, false para outros
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS,
+    },
+});
+
+// Função para enviar email
+const sendEmail = async (to, subject, text, html) => {
+    try {
+        await transporter.sendMail({
+            from: `AIQuira <${process.env.EMAIL_USER}>`,
+            to,
+            subject,
+            text,
+            html,
+        });
+        console.log(`📩 Email enviado para ${to}`);
+    } catch (error) {
+        console.error("❌ Erro ao enviar email:", error);
+    }
+};
 
 // ✅ Registo do utilizador com reCAPTCHA e validação
 app.post('/api/register', validateInput, async (req, res) => {
@@ -172,25 +274,25 @@ app.post('/api/register', validateInput, async (req, res) => {
     if (!data.success) return res.status(400).json({ error: "A verificação do reCAPTCHA falhou" });
 
     // Verifica se o email ou username já existem
-    const existingUser  = await User.findOne({ $or: [{ email }, { username }] });
-    if (existingUser ) return res.status(400).json({ error: "Utilizador já registrado" });
+    const existingUser    = await User.findOne({ $or: [{ email }, { username }] });
+    if (existingUser   ) return res.status(400).json({ error: "Utilizador já registrado" });
 
     // Cria um novo utilizador com papel padrão "user"
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser  = new User({ username, email, password: hashedPassword, role: "user" }); // Papel padrão "user"
-    await newUser .save();
+    const newUser    = new User({ username, email, password: hashedPassword, role: "user" });
+    await newUser   .save();
+
+    // Enviar email de confirmação
+    const subject = "Bem-vindo ao AIQuira!";
+    const text = `Olá ${username},\n\nObrigado por se registrar no AIQuira!`;
+    const html = `<h1>Bem-vindo ao AIQuira!</h1><p>Olá ${username},</p><p>Obrigado por se registrar no AIQuira!</p>`;
+    await sendEmail(email, subject, text, html);
+
+    // Emitir evento para notificar sobre novo usuário
+    io.emit("newUser ", { username });
+
     res.status(201).json({ message: "Utilizador registado com sucesso" });
 });
-
-// Pode executar isto num script separado ou em um endpoint protegido
-const updateAdminRole = async (email) => {
-    try {
-        await User.updateOne({ email }, { role: "admin" });
-        console.log(`Função de utilizador ${email} atualizado para admin.`);
-    } catch (error) {
-        console.error("Erro ao atualizar o função do utilizador:", error);
-    }
-};
 
 // ✅ Login do utilizador
 app.post('/api/login', validateInput, async (req, res) => {
@@ -204,19 +306,23 @@ app.post('/api/login', validateInput, async (req, res) => {
 
     // 🔹 Adiciona role no token
     const token = jwt.sign(
-        { email: user.email, username: user.username, role: user.role }, 
-        process.env.SECRET_KEY, 
+        { email: user.email, username: user.username, role: user.role, id: user._id }, // Inclua o ID do usuário
+        process.env.SECRET_KEY,
         { expiresIn: "1h" }
     );
 
     res.json({ message: "Login bem-sucedido!", token });
 });
 
+// Serve ficheiros estáticos da pasta 'uploads'
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// ✅ Criar listagem com paginação
+// ✅ Obter listagens com paginação
 app.post("/api/listings", authenticateToken, upload.single("image"), async (req, res) => {
     const { url, price, description } = req.body;
-    if (!url || !price || !description) return res.status(400).json({ error: "Todos os campos são obrigatórios" });
+    if (!url || !price || !description) {
+        return res.status(400).json({ error: "Todos os campos são obrigatórios" });
+    }
 
     try {
         const listing = new Listing({
@@ -224,26 +330,34 @@ app.post("/api/listings", authenticateToken, upload.single("image"), async (req,
             price: parseFloat(price),
             description,
             image: req.file ? `/uploads/${req.file.filename}` : null,
-            owner: req.user.email,
+            owner: req.user._id, // Certifique-se de que req.user._id está definido
         });
         await listing.save();
+
+        await sendEmail(req.user.email, "Website listado com sucesso!", `Seu website ${url} foi publicado.`);
+
+        io.emit("newListing", { url });
+
         res.status(201).json(listing);
     } catch (error) {
-        res.status(500).json({ error: "Erro ao guardar a listagem" });
+        console.error("❌ Erro ao criar listagem:", error);
+        res.status(500).json({ error: "Erro ao guardar a listagem." });
     }
 });
 
-// Serve ficheiros estáticos da pasta 'uploads'
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
-
-// ✅ Obter listagens com paginação
+// Obter listagens com pesquisa e ordenação
 app.get("/api/listings", async (req, res) => {
     let { search, sort, page = 1, limit = 10 } = req.query;
     page = parseInt(page);
     limit = parseInt(limit);
 
     let query = {};
-    if (search) query.$or = [{ url: new RegExp(search, "i") }, { description: new RegExp(search, "i") }];
+    if (search) {
+        query.$or = [
+            { url: new RegExp(search, "i") },
+            { description: new RegExp(search, "i") }
+        ];
+    }
 
     let sortOption = {};
     if (sort === "price_asc") {
@@ -256,11 +370,26 @@ app.get("/api/listings", async (req, res) => {
         let listings = await Listing.find(query)
             .sort(sortOption) // Aplica a ordenação correta
             .skip((page - 1) * limit)
-            .limit(limit);
+            .limit(limit)
+            .populate('owner', 'username email'); // Popula os detalhes do proprietário
 
         res.json(listings);
     } catch (error) {
-        res.status(500).json({ error: "Erro ao obter listagens" });
+        console.error("❌ Erro ao obter listagens:", error);
+        res.status(500).json({ error: "Erro ao obter listagens." });
+    }
+});
+
+// Eliminar listagem (apenas para admin)
+app.delete("/api/admin/listings/:id", authenticateToken, isAdmin, async (req, res) => {
+    try {
+        const listing = await Listing.findByIdAndDelete(req.params.id);
+        if (!listing) return res.status(404).json({ error: "Listagem não encontrada." });
+
+        res.json({ message: "Listagem eliminada com sucesso." });
+    } catch (error) {
+        console.error("❌ Erro ao eliminar listagem:", error);
+        res.status(500).json({ error: "Erro ao eliminar a listagem." });
     }
 });
 

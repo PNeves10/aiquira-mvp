@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { motion } from "framer-motion";
 import Card from "../components/ui/card.js";
 import CardContent from "../components/ui/cardContent.js";
 import Input from "../components/ui/input.js";
@@ -6,12 +7,16 @@ import Button from "../components/ui/button.js";
 import { useNavigate } from "react-router-dom";
 import ReCAPTCHA from "react-google-recaptcha";
 import { ClipLoader } from "react-spinners";
+import Notifications from "../components/ui/Notifications.js"; // ✅ Importar notificações
 
 const RegisterPage = () => {
     const [username, setUsername] = useState("");
+    const [usernameError, setUsernameError] = useState(""); // ✅ Novo estado para erros no username
     const [email, setEmail] = useState("");
+    const [emailError, setEmailError] = useState(""); // ✅ Novo estado para erros no email
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
+    const [success, setSuccess] = useState(""); // ✅ Nova variável para sucesso
     const [loading, setLoading] = useState(false);
     const [token, setToken] = useState("");
     const [showPassword, setShowPassword] = useState(false);
@@ -19,9 +24,10 @@ const RegisterPage = () => {
     const navigate = useNavigate();
 
     useEffect(() => {
-        // Verifica se todos os campos estão preenchidos e se o reCAPTCHA foi completado
-        setIsButtonEnabled(username && validateEmail(email) && validatePassword(password) && token);
-    }, [username, email, password, token]);
+        setIsButtonEnabled(
+            username && validateEmail(email) && validatePassword(password) && token && !emailError && !usernameError
+        );
+    }, [username, email, password, token, emailError, usernameError]);
 
     const validateEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -36,26 +42,60 @@ const RegisterPage = () => {
         );
     };
 
+    // Verificação de username em tempo real com debounce
+    useEffect(() => {
+        if (username.length < 3) {
+            setUsernameError("O username deve ter pelo menos 3 caracteres.");
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            try {
+                const response = await fetch(`http://localhost:5000/api/check-username?username=${username}`);
+                const data = await response.json();
+                if (data.exists) {
+                    setUsernameError("Este username já está registado.");
+                } else {
+                    setUsernameError("");
+                }
+            } catch {
+                setUsernameError("Erro ao verificar o username.");
+            }
+        }, 500); // Espera 500ms antes de fazer a chamada para evitar chamadas excessivas
+
+        return () => clearTimeout(timer); // Cancela a chamada anterior se o utilizador continuar a digitar
+    }, [username]);
+
+    // Verificação de email em tempo real
+    useEffect(() => {
+        if (!validateEmail(email)) {
+            setEmailError(""); // Se não for um email válido, não verifica
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            try {
+                const response = await fetch(`http://localhost:5000/api/check-email?email=${email}`);
+                const data = await response.json();
+                if (data.exists) {
+                    setEmailError("Este email já está registado.");
+                } else {
+                    setEmailError("");
+                }
+            } catch {
+                setEmailError("Erro ao verificar o email.");
+            }
+        }, 500); // Aguarda 500ms antes de fazer a chamada (evita chamadas excessivas)
+
+        return () => clearTimeout(timer); // Cancela a chamada anterior se o utilizador continuar a digitar
+    }, [email]);
+
     const handleRegister = async () => {
+        if (emailError || usernameError) return; // Bloqueia registo se o email ou username já existir
+
         setLoading(true);
         setError("");
-
-        if (!username) {
-            setLoading(false);
-            return setError("Introduza um username.");
-        }
-        if (!validateEmail(email)) {
-            setLoading(false);
-            return setError("Introduza um email válido.");
-        }
-        if (!validatePassword(password)) {
-            setLoading(false);
-            return setError("A password deve ter pelo menos 6 caracteres, incluindo maiúscula, minúscula, número e caracteres especiais.");
-        }
-        if (!token) {
-            setLoading(false);
-            return setError("Complete o reCAPTCHA antes de continuar.");
-        }
+        setSuccess(""); // Resetar sucesso antes de cada tentativa
 
         try {
             const response = await fetch("http://localhost:5000/api/register", {
@@ -74,8 +114,8 @@ const RegisterPage = () => {
             setEmail("");
             setPassword("");
             setToken("");
-            alert("Registo bem-sucedido! Faça login agora.");
-            navigate("/login");
+            setSuccess("Registo bem-sucedido! Redirecionar para o login..."); // Mensagem de sucesso com UI
+            setTimeout(() => navigate("/login"), 3000);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -84,58 +124,36 @@ const RegisterPage = () => {
     };
 
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-50">
-            <h1 className="text-3xl font-bold mb-4 text-gray-800">Registar</h1>
-
-            {error && <div role="alert" className="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded-md mb-4">{error}</div>}
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-50">
+            <motion.h1 initial={{ y: -20 }} animate={{ y: 0 }} className="text-3xl font-bold mb-4 text-gray-800">Registar</motion.h1>
             
-            <Card className="w-full max-w-sm p-4">
+            {error && <Notifications message={error} type="error" onClose={() => setError("")} />}
+            {success && <Notifications message={success} type="success" onClose={() => setSuccess("")} />}
+            
+            <Card className="w-full max-w-sm p-4 shadow-lg hover:shadow-xl transition">
                 <CardContent>
-                    <Input
-                        type="text"
-                        placeholder="Username"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                        aria-label="Nome de usuário"
-                    />
+                    <Input type="text" placeholder="Username" value={username} onChange={(e) => setUsername(e.target.value)} aria-label="Nome de usuário" />
+                    {usernameError && <p className="text-red-500 text-sm mt-1">{usernameError}</p>}
                     
-                    <Input
-                        type="email"
-                        placeholder="Email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        aria-label="Endereço de email"
-                    />
+                    <Input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} aria-label="Endereço de email" />
+                    {emailError && <p className="text-red-500 text-sm mt-1">{emailError}</p>}
                     
                     <div className="relative">
-                        <Input
-                            type={showPassword ? "text" : "password"}
-                            placeholder="Senha"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            aria-label="Senha"
-                        />
-                        <button
-                            type="button"
-                            className="absolute inset-y-0 right-3 flex items-center px-2 text-gray-600"
-                            onClick={() => setShowPassword(!showPassword)}
-                        >
+                        <Input type={showPassword ? "text" : "password"} placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} aria-label="Senha" />
+                        <button type="button" className="absolute inset-y-0 right-3 flex items-center px-2 text-gray-600" onClick={() => setShowPassword(!showPassword)}>
                             {showPassword ? "🙈" : "👁️"}
-                        </button> 
+                        </button>
                     </div>
-
+                    
                     <p className={`text-sm mt-2 ${validatePassword(password) ? "text-green-600" : "text-red-500"}`}>
-                        A password deve ter pelo menos 6 caracteres, incluindo uma letra maiúscula, uma minúscula, um número e um carácter especial.
+                        A senha deve ter pelo menos 6 caracteres, incluindo uma letra maiúscula, uma minúscula, um número e um caractere especial.
                     </p>
 
                     <div className="flex justify-center mt-4">
-                        <ReCAPTCHA
-                            sitekey="6LfZHO8qAAAAAPS_iNPgBNOcm3SkZWRxg8cdOg5W"
-                            onChange={(value) => setToken(value)}
-                        />
+                        <ReCAPTCHA sitekey="6LfZHO8qAAAAAPS_iNPgBNOcm3SkZWRxg8cdOg5W" onChange={(value) => setToken(value)} />
                     </div>
 
-                    <Button className={`mt-4 w-full ${isButtonEnabled ? "bg-blue-500 text-white" : "bg-gray-400 text-gray-700"}`} onClick={handleRegister} disabled={loading || !isButtonEnabled}>
+                    <Button className={`mt-4 w-full transition-transform transform ${isButtonEnabled ? "bg-blue-500 text-white hover:scale-105" : "bg-gray-400 text-gray-700"}`} onClick={handleRegister} disabled={loading || !isButtonEnabled}>
                         {loading ? <ClipLoader size={20} color={"#fff"} /> : "Registrar"}
                     </Button>
 
@@ -144,7 +162,7 @@ const RegisterPage = () => {
                     </p>
                 </CardContent>
             </Card>
-        </div>
+        </motion.div>
     );
 };
 

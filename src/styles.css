@@ -2,10 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Botões aprimorados */
+.btn {
+  @apply px-4 py-2 rounded font-medium transition;
+}
+.btn-primary {
+  @apply bg-blue-500 text-white hover:bg-blue-600;
+}
+.btn-danger {
+  @apply bg-red-500 text-white hover:bg-red-600;
+}
+
+/* Inputs aprimorados */
+.input {
+  @apply border p-2 rounded w-full focus:ring-2 focus:ring-blue-300;
+}
+
+/* Melhorias nas imagens */
 img {
-    max-width: 200px; /* Define a largura máxima da imagem */
-    height: auto; /* Mantém a proporção da imagem */
-    border-radius: 8px; /* Adiciona bordas arredondadas */
-    border: 1px solid #ddd; /* Adiciona uma borda cinza clara */
-    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1); /* Adiciona uma sombra sutil */
+  max-width: 200px; /* Define a largura máxima da imagem */
+  height: auto; /* Mantém a proporção da imagem */
+  border-radius: 8px; /* Adiciona bordas arredondadas */
+  border: 1px solid #ddd; /* Adiciona uma borda cinza clara */
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.1); /* Adiciona uma sombra sutil */
 }

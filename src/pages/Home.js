@@ -7,7 +7,9 @@ import Button from "../components/ui/button.js";
 import MainPage from "./MainPage.js";
 import RegisterPage from "./RegisterPage.js";
 import AdminDashboard from "../components/AdminDashboard.js";
+import FavoritesPage from "./FavoritesPage.js"; // Importar a página de favoritos
 import { ClipLoader } from "react-spinners";
+import { motion } from "framer-motion";
 
 export default function Home() {
   const [token, setToken] = useState(localStorage.getItem("token") || "");
@@ -80,56 +82,33 @@ export default function Home() {
         path="/login"
         element={
           !token ? (
-            <div className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-50">
-              <h1 className="text-3xl font-bold mb-4 text-gray-800">AIQuira - Avaliação de Websites</h1>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center min-h-screen p-4 bg-gray-50">
+              <motion.h1 initial={{ y: -20 }} animate={{ y: 0 }} transition={{ duration: 0.5 }} className="text-3xl font-bold mb-4 text-gray-800">
+                AIQuira - Avaliação de Websites
+              </motion.h1>
 
-              {error && <p role="alert" className="text-red-500 bg-red-100 p-2 rounded">{error}</p>}
+              {error && <motion.p initial={{ scale: 0.9 }} animate={{ scale: 1 }} role="alert" className="text-red-500 bg-red-100 p-2 rounded">{error}</motion.p>}
 
-              <Card className="w-full max-w-md p-4 mb-6">
+              <Card className="w-full max-w-md p-4 mb-6 shadow-lg hover:shadow-xl transition">
                 <CardContent>
                   <h2 className="text-xl font-bold mb-2">Login</h2>
 
-                  <Input
-                    type="text"
-                    placeholder="Username ou Email"
-                    value={identifier}
-                    onChange={(e) => setIdentifier(e.target.value)}
-                    aria-label="Insira seu username ou email"
-                  />
-
+                  <Input type="text" placeholder="Username ou Email" value={identifier} onChange={(e) => setIdentifier(e.target.value)} />
                   <div className="relative">
-                    <Input
-                      type={showPassword ? "text" : "password"}
-                      placeholder="Senha"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      aria-label="Insira sua password"
-                    />
-                    <button
-                      type="button"
-                      className="absolute inset-y-0 right-2 flex items-center px-2 text-gray-600"
-                      onClick={() => setShowPassword(!showPassword)}
-                    >
+                    <Input type={showPassword ? "text" : "password"} placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} />
+                    <button type="button" className="absolute inset-y-0 right-2 text-gray-600" onClick={() => setShowPassword(!showPassword)}>
                       {showPassword ? "🙈" : "👁️"}
                     </button>
                   </div>
-
-                  <Button className="bg-blue-500 text-white mt-4 w-full" onClick={handleLogin} disabled={loading}>
-                      {loading ? <ClipLoader size={20} color={"#fff"} /> : "Entrar"}
+                  <Button className="bg-blue-500 text-white mt-4 w-full transition-transform transform hover: scale-105" onClick={handleLogin} disabled={loading}>
+                    {loading ? <ClipLoader size={20} color={"#fff"} /> : "Entrar"}
                   </Button>
-
                   <p className="mt-2 text-sm text-center">
-                    Não tem uma conta?{" "}
-                    <button
-                      onClick={() => navigate("/register")}
-                      className="text-blue-500 underline"
-                    >
-                      Registar
-                    </button>
+                    Não tem uma conta? <button onClick={() => navigate("/register")} className="text-blue-500 underline">Registar</button>
                   </p>
                 </CardContent>
               </Card>
-            </div>
+            </motion.div>
           ) : (
             <Navigate to="/" />
           )
@@ -153,6 +132,8 @@ export default function Home() {
           )
         }
       />
+
+      <Route path="/favorites" element={<FavoritesPage token={token} />} /> {/* Rota para a página de favoritos */}
     </Routes>
   );
 }
