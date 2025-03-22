@@ -15,10 +15,14 @@ import { fileURLToPath } from 'url';
 import { Server } from "socket.io";
 import http from 'http';
 import nodemailer from 'nodemailer';
+import Stripe from 'stripe'; // Importar Stripe
 import Listing from './src/models/Listing.js';
 import User from './src/models/User.js';
+import Transaction from './src/models/Transaction.js'; // Importar o modelo de Transação
 
 dotenv.config();
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY); // Inicializar Stripe
 
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('✅ MongoDB ligado'))
@@ -42,7 +46,7 @@ io.on("connection", (socket) => {
     socket.emit("loadMessages", messages);
 
     // Notificar admin quando um novo usuário se regista
-    socket.on("newUser ", (user) => {
+    socket.on("newUser   ", (user) => {
         io.emit("adminNotification", `Novo utilizador registado: ${user.username}`);
     });
 
@@ -120,11 +124,102 @@ const authenticateToken = (req, res, next) => {
     jwt.verify(token, process.env.SECRET_KEY, (err, user) => {
         if (err) return res.status(403).json({ error: "Token inválido" });
 
-        // Certifique-se de que req.user._id está definido
         req.user = { ...user, _id: user._id || user.id };
         next();
     });
 };
+
+// Endpoint para checkout
+app.post("/api/checkout", authenticateToken, async (req, res) => {
+    const { listingId } = req.body;
+
+    try {
+        const listing = await Listing.findById(listingId);
+        if (!listing) return res.status(404).json({ error: "Listagem não encontrada" });
+
+        const session = await stripe.checkout.sessions.create({
+            payment_method_types: ["card"],
+            mode: "payment",
+            success_url: `${process.env.FRONTEND_URL}/checkout-success?session_id={CHECKOUT_SESSION_ID}`,
+            cancel_url: `${process.env.FRONTEND_URL}/checkout-cancel`, // Corrigido para a rota de cancelamento
+            customer_email: req.user.email,
+            line_items: [
+                {
+                    price_data: {
+                        currency: "eur",
+                        product_data: { name: listing.url },
+                        unit_amount: listing.price * 100, // Converter para cêntimos
+                    },
+                    quantity: 1,
+                },
+            ],
+            metadata: { listingId, buyerId: req.user._id, sellerId: listing.owner.toString() },
+        });
+
+        res.json({ url: session.url });
+    } catch (error) {
+        console.error("Erro ao criar sessão de checkout:", error);
+        res.status(500).json({ error: "Erro ao processar pagamento." });
+    }
+});
+
+// Endpoint para confirmar pagamento
+app.post("/api/confirm-payment", async (req, res) => {
+    const { sessionId } = req.body;
+    if (!sessionId) return res.status(400).json({ error: "ID da sessão não fornecido" });
+
+    try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
+
+        await Transaction.findOneAndUpdate(
+            { listing: session.metadata.listingId, buyer: session.metadata.buyerId },
+            { status: "concluído" }
+        );
+
+        res.json({ success: true, message: "Pagamento confirmado!" });
+    } catch (error) {
+        console.error("Erro ao confirmar pagamento:", error);
+        res.status(500).json({ error: "Erro ao confirmar pagamento." });
+    }
+});
+
+// Endpoint do webhook do Stripe
+app.post("/api/webhook", express.raw({ type: "application/json" }), async (req, res) => {
+    const sig = req.headers["stripe-signature"];
+    let event;
+
+    try {
+        event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    } catch (err) {
+        console.error("Erro no webhook:", err);
+        return res.status(400).json({ error: "Webhook inválido" });
+    }
+
+    if (event.type === "checkout.session.completed") {
+        const session = event.data.object;
+
+        await Transaction.findOneAndUpdate(
+            { listing: session.metadata.listingId, buyer: session.metadata.buyerId },
+            { status: "concluído" }
+        );
+
+        console.log("✅ Pagamento concluído e transação registada!");
+    }
+
+    if (event.type === "checkout.session.expired") {
+        const session = event.data.object;
+
+        await Transaction.findOneAndUpdate(
+            { listing: session.metadata.listingId, buyer: session.metadata.buyerId },
+            { status: "cancelado" }
+        );
+
+        console.log("❌ Pagamento cancelado.");
+    }
+
+    res.json({ received: true });
+});
 
 // Endpoint para verificar se o email já existe
 app.get("/api/check-email", async (req, res) => {
@@ -193,14 +288,11 @@ app.post("/api/favorites/:listingId", authenticateToken, async (req, res) => {
 
     const listingId = req.params.listingId;
 
-    // Verifica se já está nos favoritos
     const isFavorited = user.favorites.includes(listingId);
 
     if (isFavorited) {
-        // Remove dos favoritos
         user.favorites = user.favorites.filter((id) => id.toString() !== listingId);
     } else {
-        // Adiciona aos favoritos
         user.favorites.push(listingId);
     }
 
@@ -232,7 +324,7 @@ const storage = multer.diskStorage({
     filename: (req, file, cb) => {
         cb(null, Date.now() + path.extname(file.originalname));
     },
- });
+});
 const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 
 // Configuração do Nodemailer
@@ -289,7 +381,7 @@ app.post('/api/register', validateInput, async (req, res) => {
     await sendEmail(email, subject, text, html);
 
     // Emitir evento para notificar sobre novo usuário
-    io.emit("newUser ", { username });
+    io.emit("newUser   ", { username });
 
     res.status(201).json({ message: "Utilizador registado com sucesso" });
 });
@@ -390,6 +482,55 @@ app.delete("/api/admin/listings/:id", authenticateToken, isAdmin, async (req, re
     } catch (error) {
         console.error("❌ Erro ao eliminar listagem:", error);
         res.status(500).json({ error: "Erro ao eliminar a listagem." });
+    }
+});
+
+// ✅ Criar uma nova transação após compra
+app.post("/api/transactions", authenticateToken, async (req, res) => {
+    const { listingId, sellerId, amount } = req.body;
+    if (!listingId || !sellerId || !amount) {
+        return res.status(400).json({ error: "Dados incompletos." });
+    }
+
+    try {
+        const transaction = new Transaction({
+            buyer: req.user._id,
+            seller: sellerId,
+            listing : listingId,
+            amount,
+            status: 'pendente',
+        });
+
+        await transaction.save;
+        res.status(201).json({ message: "Transação registada!", transaction });
+
+        io.emit("adminNotification", `📢 Nova transação registada!`);
+    } catch (error) {
+        res.status(500).json({ error: "Erro ao criar transação." });
+    }
+});
+
+// ✅ Histórico de compras do utilizador autenticado
+app.get("/api/transactions/buyer", authenticateToken, async (req, res) => {
+    try {
+        const transactions = await Transaction.find({ buyer: req.user._id })
+            .populate('listing', 'url price')
+            .populate('seller', 'username email');
+        res.json(transactions);
+    } catch (error) {
+        res.status(500).json({ error: "Erro ao obter compras." });
+    }
+});
+
+// ✅ Histórico de vendas do utilizador autenticado
+app.get("/api/transactions/seller", authenticateToken, async (req, res) => {
+    try {
+        const transactions = await Transaction.find({ seller: req.user._id })
+            .populate('listing', 'url price')
+            .populate('buyer', 'username email');
+        res.json(transactions);
+    } catch (error) {
+        res.status(500).json({ error: "Erro ao obter vendas." });
     }
 });
 

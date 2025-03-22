@@ -156,6 +156,29 @@ const MainPage = ({ token, setToken, handleLogout }) => {
         }
     };
 
+    const handleCheckout = async (listingId) => {
+        try {
+            const response = await fetch("http://localhost:5000/api/checkout", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ listingId }),
+            });
+
+            const data = await response.json();
+            if (data.url) {
+                window.location.href = data.url; // Redirecionar para o Stripe Checkout
+            } else {
+                alert("Erro ao iniciar pagamento.");
+            }
+        } catch (error) {
+            console.error("Erro ao processar pagamento:", error);
+            alert("Erro ao processar pagamento.");
+        }
+    };
+
     useEffect(() => {
         socket.on("receiveMessage", (message) => {
             setNotifications((prev) => [...prev, `📩 Nova mensagem de ${message.sender}`]);
@@ -191,6 +214,10 @@ const MainPage = ({ token, setToken, handleLogout }) => {
                 ⭐ Ver Favoritos
             </Button>
 
+            <Button className="bg-green-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/transactions")}>
+                📜 Ver Histórico de Transações
+            </Button>
+
             <Card className="w-full max-w-md p-4 mb-6">
                 <CardContent>
                     <Input type="text" placeholder="URL do website" value={newListing.url} onChange={(e) => setNewListing({ ...newListing, url: e.target.value })} />
@@ -208,7 +235,7 @@ const MainPage = ({ token, setToken, handleLogout }) => {
                 <select className="border p-2 rounded" value={sort} onChange={(e) => setSort(e.target.value)}>
                     <option value="">Ordenar</option>
                     <option value="price_asc">Preço: Menor → Maior</option>
-                    < option value="price_desc">Preço: Maior → Menor</option>
+                    <option value="price_desc">Preço: Maior → Menor</option>
                 </select>
             </div>
 
@@ -231,6 +258,12 @@ const MainPage = ({ token, setToken, handleLogout }) => {
                                     onClick={() => toggleFavorite(listing._id)}
                                 >
                                     {favorites.includes(listing._id) ? "❤️ Remover" : "🤍 Favorito"}
+                                </Button>
+                                <Button
+                                    className="mt-2 bg-green-500 text-white px-4 py-2 rounded"
+                                    onClick={() => handleCheckout(listing._id)}
+                                >
+                                    💳 Comprar
                                 </Button>
                             </CardContent>
                         </Card>

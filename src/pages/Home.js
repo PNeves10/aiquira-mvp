@@ -8,6 +8,9 @@ import MainPage from "./MainPage.js";
 import RegisterPage from "./RegisterPage.js";
 import AdminDashboard from "../components/AdminDashboard.js";
 import FavoritesPage from "./FavoritesPage.js"; // Importar a página de favoritos
+import TransactionsPage from "./TransactionsPage.js"; // Importa a nova página de transações
+import SuccessPage from "./SuccessPage.js"; // Importar a página de sucesso
+import CancelPage from "./CancelPage.js"; // Importar a página de cancelamento
 import { ClipLoader } from "react-spinners";
 import { motion } from "framer-motion";
 
@@ -100,7 +103,7 @@ export default function Home() {
                       {showPassword ? "🙈" : "👁️"}
                     </button>
                   </div>
-                  <Button className="bg-blue-500 text-white mt-4 w-full transition-transform transform hover: scale-105" onClick={handleLogin} disabled={loading}>
+                  <Button className="bg-blue-500 text-white mt-4 w-full transition-transform transform hover:scale-105" onClick={handleLogin} disabled={loading}>
                     {loading ? <ClipLoader size={20} color={"#fff"} /> : "Entrar"}
                   </Button>
                   <p className="mt-2 text-sm text-center">
@@ -133,7 +136,10 @@ export default function Home() {
         }
       />
 
-      <Route path="/favorites" element={<FavoritesPage token={token} />} /> {/* Rota para a página de favoritos */}
+      <Route path="/favorites" element={<FavoritesPage token={token} />} />
+      <Route path="/transactions" element={<TransactionsPage token={token} />} />
+      <Route path="/checkout-success" element={<SuccessPage />} />
+      <Route path="/checkout-cancel" element={<CancelPage />} />
     </Routes>
   );
 }
