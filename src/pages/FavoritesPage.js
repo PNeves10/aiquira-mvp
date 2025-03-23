@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
-import Notifications from "../components/ui/Notifications.js";
+import Notifications from "../components/Notifications.js";
 import Button from "../components/ui/button.js";
 
 const FavoritesPage = ({ token }) => {

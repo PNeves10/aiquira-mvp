@@ -7,10 +7,15 @@ import Button from "../components/ui/button.js";
 import MainPage from "./MainPage.js";
 import RegisterPage from "./RegisterPage.js";
 import AdminDashboard from "../components/AdminDashboard.js";
-import FavoritesPage from "./FavoritesPage.js"; // Importar a página de favoritos
-import TransactionsPage from "./TransactionsPage.js"; // Importa a nova página de transações
-import SuccessPage from "./SuccessPage.js"; // Importar a página de sucesso
-import CancelPage from "./CancelPage.js"; // Importar a página de cancelamento
+import FavoritesPage from "./FavoritesPage.js";
+import TransactionsPage from "./TransactionsPage.js";
+import SuccessPage from "./SuccessPage.js";
+import CancelPage from "./CancelPage.js";
+import TopWebsites from "./TopWebsites.js";
+import TopRankings from "./TopRankings.js"; 
+import StatsPage from "./StatsPage.js";
+import OwnerDashboard from "./OwnerDashboard.js";
+import ProfilePage from "./ProfilePage.js"; // Importando o ProfilePage
 import { ClipLoader } from "react-spinners";
 import { motion } from "framer-motion";
 
@@ -101,7 +106,7 @@ export default function Home() {
                     <Input type={showPassword ? "text" : "password"} placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} />
                     <button type="button" className="absolute inset-y-0 right-2 text-gray-600" onClick={() => setShowPassword(!showPassword)}>
                       {showPassword ? "🙈" : "👁️"}
-                    </button>
+ </button>
                   </div>
                   <Button className="bg-blue-500 text-white mt-4 w-full transition-transform transform hover:scale-105" onClick={handleLogin} disabled={loading}>
                     {loading ? <ClipLoader size={20} color={"#fff"} /> : "Entrar"}
@@ -140,6 +145,11 @@ export default function Home() {
       <Route path="/transactions" element={<TransactionsPage token={token} />} />
       <Route path="/checkout-success" element={<SuccessPage />} />
       <Route path="/checkout-cancel" element={<CancelPage />} />
+      <Route path="/top-websites" element={<TopWebsites token={token} />} />
+      <Route path="/top-rankings" element={<TopRankings token={token} />} />
+      <Route path="/stats" element={<StatsPage token={token} />} />
+      <Route path="/owner-dashboard" element={<OwnerDashboard token={token} />} />
+      <Route path="/profile" element={<ProfilePage token={token} />} /> {/* Adicionando a rota do ProfilePage */}
     </Routes>
   );
 }

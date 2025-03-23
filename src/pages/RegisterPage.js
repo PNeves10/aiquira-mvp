@@ -7,7 +7,7 @@ import Button from "../components/ui/button.js";
 import { useNavigate } from "react-router-dom";
 import ReCAPTCHA from "react-google-recaptcha";
 import { ClipLoader } from "react-spinners";
-import Notifications from "../components/ui/Notifications.js"; // ✅ Importar notificações
+import Notifications from "../components/Notifications.js"; // ✅ Importar notificações
 
 const RegisterPage = () => {
     const [username, setUsername] = useState("");

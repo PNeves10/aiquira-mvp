@@ -9,8 +9,10 @@ import Input from "../components/ui/input.js";
 import Button from "../components/ui/button.js";
 import Textarea from "../components/ui/textarea.js";
 import { ClipLoader } from "react-spinners";
-import Notifications from "../components/ui/Notifications.js"; // Importar notificações
+import Notifications from "../components/Notifications.js"; 
 import Chat from "../components/Chat.js";
+import ReviewForm from "../components/ReviewForm.js"; 
+import ReviewList from "../components/ReviewList.js"; 
 
 const socket = io("http://localhost:5000");
 
@@ -20,15 +22,15 @@ const MainPage = ({ token, setToken, handleLogout }) => {
     const [favorites, setFavorites] = useState([]);
     const [newListing, setNewListing] = useState({ url: "", price: "", description: "" });
     const [image, setImage] = useState(null);
-    const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
     const [loadingSubmit, setLoadingSubmit] = useState(false);
     const [search, setSearch] = useState("");
     const [sort, setSort] = useState("");
+    const [minRating, setMinRating] = useState(0);
     const [username, setUsername] = useState("");
     const [role, setRole] = useState("");
     const [notifications, setNotifications] = useState([]);
-    const [notification, setNotification] = useState(""); // Estado para notificações
+    const [notification, setNotification] = useState("");
 
     useEffect(() => {
         if (token) {
@@ -40,11 +42,9 @@ const MainPage = ({ token, setToken, handleLogout }) => {
 
     const fetchListings = useCallback(async () => {
         setLoading(true);
-        setError("");
-
         try {
             const response = await fetch(
-                `http://localhost:5000/api/listings?search=${search}&sort=${sort}`,
+                `http://localhost:5000/api/listings?search=${search}&sort=${sort}&minRating=${minRating}`,
                 { headers: { Authorization: `Bearer ${token}` } }
             );
 
@@ -57,11 +57,11 @@ const MainPage = ({ token, setToken, handleLogout }) => {
             const data = await response.json();
             setListings(Array.isArray(data) ? data : []);
         } catch (err) {
-            setError(err.message || "Falha ao carregar listagens.");
+            console.error(err.message || "Falha ao carregar listagens.");
         } finally {
             setLoading(false);
         }
-    }, [search, sort, token]);
+    }, [search, sort, minRating, token]);
 
     useEffect(() => {
         const validateToken = async () => {
@@ -84,22 +84,25 @@ const MainPage = ({ token, setToken, handleLogout }) => {
 
     useEffect(() => {
         if (token) fetchListings();
-    }, [fetchListings, token, sort]);
+    }, [fetchListings, token, sort, minRating]);
 
-    // Buscar favoritos do utilizador
     useEffect(() => {
         const fetchFavorites = async () => {
-            const response = await fetch("http://localhost:5000/api/favorites", {
-                headers: { Authorization: `Bearer ${token}` },
-            });
-            const data = await response.json();
-            setFavorites(data.map((fav) => fav._id));
+            try {
+                const response = await fetch("http://localhost:5000/api/favorites", {
+                    headers: { Authorization: `Bearer ${token}` },
+                });
+                if (!response.ok) throw new Error("Erro ao buscar favoritos.");
+                const data = await response.json();
+                setFavorites(data.map((fav) => fav._id));
+            } catch (error) {
+                console.error("Erro ao buscar favoritos:", error);
+            }
         };
 
         if (token) fetchFavorites();
     }, [token]);
 
-    // Função para adicionar/remover favoritos
     const toggleFavorite = async (listingId) => {
         try {
             const response = await fetch(`http://localhost:5000/api/favorites/${listingId}`, {
@@ -109,7 +112,7 @@ const MainPage = ({ token, setToken, handleLogout }) => {
 
             const data = await response.json();
             setFavorites(data.favorites);
-            setNotification(data.favorites.includes(listingId) ? "Adicionado aos favoritos!" : "Removido dos favoritos."); // Atualiza a notificação
+            setNotification(data.favorites.includes(listingId) ? " Adicionado aos favoritos!" : "Removido dos favoritos.");
         } catch {
             setNotification("Erro ao atualizar favoritos.");
         }
@@ -120,7 +123,7 @@ const MainPage = ({ token, setToken, handleLogout }) => {
     const handleListWebsite = async () => {
         if (!token) return alert("Precisa estar autenticado!");
         if (!newListing.url || !newListing.price || !newListing.description || !image) {
-            return setError("Todos os campos são obrigatórios.");
+            return alert("Todos os campos são obrigatórios.");
         }
 
         const formData = new FormData();
@@ -130,7 +133,6 @@ const MainPage = ({ token, setToken, handleLogout }) => {
         formData.append("image", image);
 
         setLoadingSubmit(true);
-        setError("");
 
         try {
             const response = await fetch("http://localhost:5000/api/listings", {
@@ -150,7 +152,7 @@ const MainPage = ({ token, setToken, handleLogout }) => {
             setImage(null);
             alert("✅ Website publicado com sucesso!");
         } catch (err) {
-            setError(err.message);
+            alert(err.message);
         } finally {
             setLoadingSubmit(false);
         }
@@ -169,7 +171,7 @@ const MainPage = ({ token, setToken, handleLogout }) => {
 
             const data = await response.json();
             if (data.url) {
-                window.location.href = data.url; // Redirecionar para o Stripe Checkout
+                window.location.href = data.url;
             } else {
                 alert("Erro ao iniciar pagamento.");
             }
@@ -186,6 +188,19 @@ const MainPage = ({ token, setToken, handleLogout }) => {
 
         return () => socket.off("receiveMessage");
     }, []);
+
+    const getBadges = (listing) => {
+        let badges = [];
+
+        if (listing.views >= 100) badges.push("🔥 Popular");
+        const createdAt = new Date(listing.createdAt);
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        if (createdAt >= sevenDaysAgo) badges.push("🎉 Novo");
+        if (listing.salesCount >= 3) badges.push("🏆 Top Seller");
+
+        return badges;
+    };
 
     return (
         <motion.div className="p-6 flex flex-col items-center relative bg-gray-100 min-h-screen">
@@ -210,12 +225,32 @@ const MainPage = ({ token, setToken, handleLogout }) => {
 
             <motion.h2 initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="text-3xl font-bold mb-4 text-center mt-12">Listar Website para Venda</motion.h2>
 
+            <Button className="bg-blue-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/profile")}>
+                👤 Meu Perfil
+            </Button>
+            
             <Button className="bg-yellow-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/favorites")}>
                 ⭐ Ver Favoritos
             </Button>
 
             <Button className="bg-green-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/transactions")}>
                 📜 Ver Histórico de Transações
+            </Button>
+
+            <Button className="bg-purple-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/top-websites")}>
+                🏆 Ver Top Websites ⭐⭐⭐⭐⭐
+            </Button>
+
+            <Button className="bg-purple-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/top-rankings")}>
+                🏆 Ver Ranking de Websites
+            </Button>
+
+            <Button className="bg-blue-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/stats")}>
+                📊 Ver Estatísticas
+            </Button>
+
+            <Button className="bg-green-500 text-white px-4 py-2 rounded mb-4" onClick={() => navigate("/owner-dashboard")}>
+                📊 Meu Painel de Estatísticas
             </Button>
 
             <Card className="w-full max-w-md p-4 mb-6">
@@ -237,6 +272,13 @@ const MainPage = ({ token, setToken, handleLogout }) => {
                     <option value="price_asc">Preço: Menor → Maior</option>
                     <option value="price_desc">Preço: Maior → Menor</option>
                 </select>
+                <select className="border p-2 rounded" value={minRating} onChange={(e) => setMinRating(e.target.value)}>
+                    <option value="0">Todas</option>
+                    <option value="3">3⭐ ou mais</option>
+                    <option value="4">4⭐ ou mais</option>
+                    <option value="4.5">4.5⭐ ou mais</option>
+                    <option value="5">5⭐ apenas</option>
+                </select>
             </div>
 
             <h2 className="text-2xl font-bold mt-8 mb-4 text-center">Websites Disponíveis para Compra</h2>
@@ -253,6 +295,12 @@ const MainPage = ({ token, setToken, handleLogout }) => {
                                 <p><strong>Descrição:</strong> {listing.description}</p>
                                 <p><strong>Proprietário:</strong> {listing.owner ? `${listing.owner.username} (${listing.owner.email})` : "Desconhecido"}</p>
 
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                    {getBadges(listing).map((badge, index) => (
+                                        <span key={index} className="badge">{badge}</span>
+                                    ))}
+                                </div>
+
                                 <Button
                                     className={`mt-2 px-3 py-1 rounded ${favorites.includes(listing._id) ? "bg-red-500" : "bg-gray-500"}`}
                                     onClick={() => toggleFavorite(listing._id)}
@@ -260,11 +308,14 @@ const MainPage = ({ token, setToken, handleLogout }) => {
                                     {favorites.includes(listing._id) ? "❤️ Remover" : "🤍 Favorito"}
                                 </Button>
                                 <Button
-                                    className="mt-2 bg-green-500 text-white px-4 py-2 rounded"
+                                    className="mt- 2 bg-green-500 text-white px-4 py-2 rounded"
                                     onClick={() => handleCheckout(listing._id)}
                                 >
                                     💳 Comprar
                                 </Button>
+
+                                <ReviewForm listingId={listing._id} token={token} onReviewSubmitted={() => fetchListings()} />
+                                <ReviewList listingId={listing._id} token={token} isOwner={listing.owner?._id === username} />
                             </CardContent>
                         </Card>
                     ))}

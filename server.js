@@ -15,14 +15,15 @@ import { fileURLToPath } from 'url';
 import { Server } from "socket.io";
 import http from 'http';
 import nodemailer from 'nodemailer';
-import Stripe from 'stripe'; // Importar Stripe
+import Stripe from 'stripe';
 import Listing from './src/models/Listing.js';
 import User from './src/models/User.js';
-import Transaction from './src/models/Transaction.js'; // Importar o modelo de Transação
+import Transaction from './src/models/Transaction.js';
+import Review from './src/models/Review.js';
 
 dotenv.config();
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY); // Inicializar Stripe
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log('✅ MongoDB ligado'))
@@ -32,41 +33,31 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const server = http.createServer(app); // Criar um servidor HTTP
+const server = http.createServer(app);
 const io = new Server(server, {
-  cors: { origin: "*" },
+    cors: { origin: "*" },
 });
 
-let messages = []; // Array para armazenar mensagens temporariamente
+let messages = [];
 
 io.on("connection", (socket) => {
     console.log("Novo utilizador ligado!");
-
-    // Enviar mensagens armazenadas para o utilizador conectado
     socket.emit("loadMessages", messages);
 
-    // Notificar admin quando um novo usuário se regista
-    socket.on("newUser   ", (user) => {
+    socket.on("newUser ", (user) => {
         io.emit("adminNotification", `Novo utilizador registado: ${user.username}`);
     });
 
-    // Notificar admin quando uma nova listagem é criada
     socket.on("newListing", (listing) => {
         io.emit("adminNotification", `Nova listagem publicada: ${listing.url}`);
     });
 
-    // Enviar mensagem e notificar todos os usuários
     socket.on("sendMessage", async (data) => {
-        messages.push(data); // Guardar mensagem no array
-        io.emit("receiveMessage", data); // Enviar mensagem a todos os utilizadores ligados
-
-        // Emitir notificação para todos os usuários
+        messages.push(data);
+        io.emit("receiveMessage", data);
         io.emit("newMessageNotification", `Nova mensagem de ${data.sender}: "${data.text}"`);
-
-        // Notificar admin sobre novas mensagens no chat
         io.emit("adminNotification", `Nova mensagem de ${data.sender}: "${data.text}"`);
 
-        // Buscar email do destinatário (se necessário)
         const recipient = await User.findOne({ username: data.receiver });
         if (recipient) {
             sendEmail(
@@ -85,17 +76,15 @@ io.on("connection", (socket) => {
 
 // Configurações do Express
 app.use(express.json());
-app.use(morgan('dev')); // Monitoriza pedidos no console
+app.use(morgan('dev'));
 
-// CORS Seguro
 app.use(cors({
     origin: 'http://localhost:3000',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'], // ✅ Garante que "Authorization" é permitido
+    allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
 }));
 
-// Segurança com Helmet
 app.use(helmet({
     contentSecurityPolicy: {
         directives: {
@@ -108,7 +97,6 @@ app.use(helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" },
 }));
 
-// Limitar os pedidos para evitar ataques DDoS
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
@@ -116,7 +104,6 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Middleware de autenticação JWT
 const authenticateToken = (req, res, next) => {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) return res.status(401).json({ error: "Acesso negado" });
@@ -128,6 +115,166 @@ const authenticateToken = (req, res, next) => {
         next();
     });
 };
+
+// Endpoint para obter perfil do usuário autenticado
+app.get("/api/profile", authenticateToken, async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).select("-password"); // Remover a senha
+        if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
+
+        // Buscar transações do usuário
+        const transactions = await Transaction.find({ buyer: user._id }).populate("listing", "url price");
+
+        // Buscar avaliações do usuário
+        const reviews = await Review.find({ user: user._id }).populate("listing", "url");
+
+        res.json({ user, transactions, reviews });
+    } catch (error) {
+        console.error("Erro ao carregar perfil:", error);
+        res.status(500).json({ error: "Erro ao carregar perfil." });
+    }
+});
+
+// Endpoint para obter estatísticas do proprietário
+app.get("/api/my-stats", authenticateToken, async (req, res) => {
+    try {
+        const myListings = await Listing.find({ owner: req.user._id });
+
+        const stats = myListings.map(listing => ({
+            url: listing.url,
+            views: listing.views,
+            salesCount: listing.salesCount,
+            rating: listing.rating || 0
+        }));
+
+        res.json(stats);
+    } catch (error) {
+        console.error("Erro ao obter estatísticas do proprietário:", error);
+        res.status(500).json({ error: "Erro ao carregar estatísticas." });
+    }
+});
+
+// Endpoint para obter estatísticas sobre listagens
+app.get("/api/stats", async (req, res) => {
+    try {
+        const topSold = await Listing.find().sort({ salesCount: -1 }).limit(5);
+        const topViewed = await Listing.find().sort({ views: -1 }).limit(5);
+        const ratingDistribution = await Listing.aggregate([
+            { $group: { _id: "$rating", count: { $sum: 1 } } },
+            { $sort: { _id: 1 } }
+        ]);
+
+        res.json({
+            topSold,
+            topViewed,
+            ratingDistribution
+        });
+    } catch (error) {
+        console.error("Erro ao obter estatísticas:", error);
+        res.status(500).json({ error: "Erro ao carregar estatísticas." });
+    }
+});
+
+// Endpoint para obter os websites mais vendidos, mais visualizados e mais bem avaliados
+app.get("/api/top-websites", async (req, res) => {
+    try {
+        const topSold = await Listing.find().sort({ salesCount: -1 }).limit(10);
+        const topViewed = await Listing.find().sort({ views: -1 }).limit(10);
+        const topRated = await Listing.find().sort({ rating: -1 }).limit(10);
+
+        res.json({
+            topSold,
+            topViewed,
+            topRated
+        });
+    } catch (error) {
+        console.error("Erro ao obter ranking de websites:", error);
+        res.status(500).json({ error: "Erro ao carregar ranking." });
+    }
+});
+
+// Endpoint para adicionar uma avaliação a uma listagem
+app.post("/api/listings/:id/review", authenticateToken, async (req, res) => {
+    try {
+        const { rating, comment } = req.body;
+        const listing = await Listing.findById(req.params.id);
+        if (!listing) return res.status(404).json({ error: "Website não encontrado." });
+
+        // Verifica se o usuário já comprou esse site
+        const transaction = await Transaction.findOne({ buyer: req.user._id, listing: listing._id });
+        if (!transaction) return res.status(403).json({ error: "Apenas compradores podem avaliar." });
+
+        // Adiciona a avaliação ao website
+        listing.ratings.push({ user: req.user._id, rating, comment });
+        await listing.save();
+
+        // Recalcula a média de avaliações
+        const reviews = await Review.find({ listing: listing._id });
+        const avgRating = reviews.reduce((acc, r) => acc + r.rating, 0) / reviews.length;
+        await Listing.findByIdAndUpdate(listing._id, { rating: avgRating });
+
+        res.json({ message: "Avaliação enviada com sucesso!" });
+    } catch (error) {
+        console.error("Erro ao avaliar website:", error);
+        res.status(500).json({ error: "Erro ao processar avaliação." });
+    }
+});
+
+// Endpoint para obter avaliações de uma listagem
+app.get("/api/listings/:id/reviews", async (req, res) => {
+    try {
+        const listing = await Listing.findById(req.params.id).populate("ratings.user", "username");
+        if (!listing) return res.status(404).json({ error: "Website não encontrado." });
+
+        res.json({ reviews: listing.ratings });
+    } catch (error) {
+        console.error("Erro ao buscar avaliações:", error);
+        res.status(500).json({ error: "Erro ao carregar avaliações." });
+    }
+});
+
+// Endpoint para responder avaliações
+app.post("/api/listings/:listingId/reviews/:reviewIndex/respond", authenticateToken, async (req, res) => {
+    try {
+        const { responseText } = req.body;
+        const { listingId, reviewIndex } = req.params;
+
+        const listing = await Listing.findById(listingId).populate("owner");
+        if (!listing) return res.status(404).json({ error: "Website não encontrado." });
+
+        // Verifica se o usuário é o dono do website
+        if (listing.owner._id.toString() !== req.user._id.toString()) {
+            return res.status(403).json({ error: "Somente o vendedor pode responder avaliações." });
+        }
+
+        // Verifica se a avaliação existe
+        if (!listing.ratings[reviewIndex]) {
+            return res.status(404).json({ error: "Avaliação não encontrada." });
+        }
+
+        // Adiciona a resposta
+        listing.ratings[reviewIndex].response = { text: responseText, date: new Date() };
+        await listing.save();
+
+        // Enviar notificação ao comprador
+        await sendNotification(listing.ratings[reviewIndex].user, `📩 O vendedor respondeu sua avaliação em ${listing.url}`);
+
+        res.json({ message: "Resposta enviada com sucesso!" });
+    } catch (error) {
+        console.error("Erro ao responder avaliação:", error);
+        res.status(500).json({ error: "Erro ao processar resposta." });
+    }
+});
+
+// Endpoint para registrar visualizações
+app.post("/api/listings/:id/view", async (req, res) => {
+    try {
+        await Listing.findByIdAndUpdate(req.params.id, { $inc: { views: 1 } });
+        res.json({ message: "Visualização registrada!" });
+    } catch (error) {
+        res.status(500).json({ error: "Erro ao registrar visualização." });
+    }
+});
 
 // Endpoint para checkout
 app.post("/api/checkout", authenticateToken, async (req, res) => {
@@ -141,14 +288,14 @@ app.post("/api/checkout", authenticateToken, async (req, res) => {
             payment_method_types: ["card"],
             mode: "payment",
             success_url: `${process.env.FRONTEND_URL}/checkout-success?session_id={CHECKOUT_SESSION_ID}`,
-            cancel_url: `${process.env.FRONTEND_URL}/checkout-cancel`, // Corrigido para a rota de cancelamento
+            cancel_url: `${process.env.FRONTEND_URL}/checkout-cancel`,
             customer_email: req.user.email,
             line_items: [
                 {
                     price_data: {
                         currency: "eur",
                         product_data: { name: listing.url },
-                        unit_amount: listing.price * 100, // Converter para cêntimos
+                        unit_amount: listing.price * 100,
                     },
                     quantity: 1,
                 },
@@ -172,10 +319,14 @@ app.post("/api/confirm-payment", async (req, res) => {
         const session = await stripe.checkout.sessions.retrieve(sessionId);
         if (!session) return res.status(404).json({ error: "Sessão não encontrada" });
 
+        // Atualiza o status da transação para "concluído"
         await Transaction.findOneAndUpdate(
             { listing: session.metadata.listingId, buyer: session.metadata.buyerId },
             { status: "concluído" }
         );
+
+        // Incrementa o contador de vendas da listagem
+        await Listing.findByIdAndUpdate(session.metadata.listingId, { $inc: { salesCount: 1 } });
 
         res.json({ success: true, message: "Pagamento confirmado!" });
     } catch (error) {
@@ -234,7 +385,7 @@ app.get("/api/check-email", async (req, res) => {
     }
 });
 
-// Endpoint para verificar se o nome de usuário já existe
+// Endpoint para verificar se o nome de utilizador já existe
 app.get("/api/check-username", async (req, res) => {
     const { username } = req.query;
     if (!username) return res.status(400).json({ error: "Username não fornecido." });
@@ -308,7 +459,7 @@ app.get("/api/favorites", authenticateToken, async (req, res) => {
     res.json(user.favorites);
 });
 
-// Middleware de validação de input (Proteção extra)
+// Middleware de validação de input
 const validateInput = (req, res, next) => {
     const { username, email, password, identifier } = req.body;
     if (username && !/^[a-zA-Z0-9_]{3,20}$/.test(username)) return res.status(400).json({ error: "Username inválido" });
@@ -331,7 +482,7 @@ const upload = multer({ storage, limits: { fileSize: 5 * 1024 * 1024 } });
 const transporter = nodemailer.createTransport({
     host: process.env.EMAIL_HOST,
     port: process.env.EMAIL_PORT,
-    secure: false, // true para 465, false para outros
+    secure: false,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
@@ -358,30 +509,25 @@ const sendEmail = async (to, subject, text, html) => {
 app.post('/api/register', validateInput, async (req, res) => {
     const { username, email, password, token } = req.body;
 
-    // Verifica reCAPTCHA
     const response = await fetch(`https://www.google.com/recaptcha/api/siteverify?secret=${process.env.RECAPTCHA_SECRET}&response=${token}`, {
         method: 'POST',
     });
     const data = await response.json();
     if (!data.success) return res.status(400).json({ error: "A verificação do reCAPTCHA falhou" });
 
-    // Verifica se o email ou username já existem
-    const existingUser    = await User.findOne({ $or: [{ email }, { username }] });
-    if (existingUser   ) return res.status(400).json({ error: "Utilizador já registrado" });
+    const existingUser  = await User.findOne({ $or: [{ email }, { username }] });
+    if (existingUser ) return res.status(400).json({ error: "Utilizador já registrado" });
 
-    // Cria um novo utilizador com papel padrão "user"
     const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser    = new User({ username, email, password: hashedPassword, role: "user" });
-    await newUser   .save();
+    const newUser  = new User({ username, email, password: hashedPassword, role: "user" });
+    await newUser .save();
 
-    // Enviar email de confirmação
     const subject = "Bem-vindo ao AIQuira!";
     const text = `Olá ${username},\n\nObrigado por se registrar no AIQuira!`;
     const html = `<h1>Bem-vindo ao AIQuira!</h1><p>Olá ${username},</p><p>Obrigado por se registrar no AIQuira!</p>`;
     await sendEmail(email, subject, text, html);
 
-    // Emitir evento para notificar sobre novo usuário
-    io.emit("newUser   ", { username });
+    io.emit("newUser ", { username });
 
     res.status(201).json({ message: "Utilizador registado com sucesso" });
 });
@@ -396,9 +542,8 @@ app.post('/api/login', validateInput, async (req, res) => {
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (!passwordMatch) return res.status(401).json({ error: "Password incorreta" });
 
-    // 🔹 Adiciona role no token
     const token = jwt.sign(
-        { email: user.email, username: user.username, role: user.role, id: user._id }, // Inclua o ID do usuário
+        { email: user.email, username: user.username, role: user.role, id: user._id },
         process.env.SECRET_KEY,
         { expiresIn: "1h" }
     );
@@ -422,7 +567,7 @@ app.post("/api/listings", authenticateToken, upload.single("image"), async (req,
             price: parseFloat(price),
             description,
             image: req.file ? `/uploads/${req.file.filename}` : null,
-            owner: req.user._id, // Certifique-se de que req.user._id está definido
+            owner: req.user._id,
         });
         await listing.save();
 
@@ -437,11 +582,12 @@ app.post("/api/listings", authenticateToken, upload.single("image"), async (req,
     }
 });
 
-// Obter listagens com pesquisa e ordenação
+// ✅ Obter listagens com pesquisa e ordenação
 app.get("/api/listings", async (req, res) => {
-    let { search, sort, page = 1, limit = 10 } = req.query;
+    let { search, sort, minRating, page = 1, limit = 10 } = req.query;
     page = parseInt(page);
     limit = parseInt(limit);
+    minRating = parseFloat(minRating);
 
     let query = {};
     if (search) {
@@ -451,19 +597,25 @@ app.get("/api/listings", async (req, res) => {
         ];
     }
 
+    if (!isNaN(minRating)) {
+        query.rating = { $gte: minRating };
+    }
+
     let sortOption = {};
     if (sort === "price_asc") {
-        sortOption = { price: 1 }; // Ordem crescente
+        sortOption = { price: 1 };
     } else if (sort === "price_desc") {
-        sortOption = { price: -1 }; // Ordem decrescente
+        sortOption = { price: -1 };
+    } else if (sort === "rating_desc") {
+        sortOption = { rating: -1 };
     }
 
     try {
         let listings = await Listing.find(query)
-            .sort(sortOption) // Aplica a ordenação correta
+            .sort(sortOption)
             .skip((page - 1) * limit)
             .limit(limit)
-            .populate('owner', 'username email'); // Popula os detalhes do proprietário
+            .populate('owner', 'username email');
 
         res.json(listings);
     } catch (error) {
@@ -496,12 +648,12 @@ app.post("/api/transactions", authenticateToken, async (req, res) => {
         const transaction = new Transaction({
             buyer: req.user._id,
             seller: sellerId,
-            listing : listingId,
+            listing: listingId,
             amount,
             status: 'pendente',
         });
 
-        await transaction.save;
+        await transaction.save();
         res.status(201).json({ message: "Transação registada!", transaction });
 
         io.emit("adminNotification", `📢 Nova transação registada!`);

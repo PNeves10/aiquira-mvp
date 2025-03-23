@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { io } from "socket.io-client";
-import Notifications from "../components/ui/Notifications.js"; // Importar notificações
+import Notifications from "./Notifications.js"; // Importar notificações
 
 const socket = io("http://localhost:5000");
 
